@@ -718,6 +718,85 @@ index aea6ec2cc..1cc0becfa 100644
 +manifest_hash: dd555857d524dfa9add6e0f988cce6bcef7ed6381a2e050c8a4b22ca45c2fc73
  target: esp32p4
  version: 2.0.0
+diff --git a/ports/esp32/machine_sdcard.c b/ports/esp32/machine_sdcard.c
+index 0f8bd8446..5077cad37 100644
+--- a/ports/esp32/machine_sdcard.c
++++ b/ports/esp32/machine_sdcard.c
+@@ -64,6 +64,13 @@ typedef struct _sdcard_obj_t {
+     // The card structure duplicates the host. It's not clear if we
+     // can avoid this given the way that it is copied.
+     sdmmc_card_t card;
++    #if SOC_SDMMC_HOST_SUPPORTED
++    // Saved SDMMC slot configuration so a hotplug reinsert can re-init the
++    // *slot* in place (restoring 400 kHz/1-bit probing state) without ever
++    // tearing down the one global host + its transaction mutex.
++    // See docs/knowledge/esp32-p4-sdcard-hotplug-no-host-deinit.md.
++    sdmmc_slot_config_t slot_config;
++    #endif
+ } sdcard_card_obj_t;
+ 
+ #define SDCARD_CARD_FLAGS_HOST_INIT_DONE 0x01
+@@ -409,6 +416,9 @@ static mp_obj_t machine_sdcard_make_new(const mp_obj_type_t *type, size_t n_args
+ 
+         DEBUG_printf("  Calling init_slot()");
+         check_esp_err(sdmmc_host_init_slot(self->host.slot, &slot_config));
++        // Remember the slot config so reinit_slot() can re-run this in place
++        // after a hotplug removal (the SDMMC host stays up; no mutex churn).
++        self->slot_config = slot_config;
+     }
+     #endif // SOC_SDMMC_HOST_SUPPORTED
+ 
+@@ -531,10 +541,50 @@ static mp_obj_t machine_sdcard_ioctl(mp_obj_t self_in, mp_obj_t cmd_in, mp_obj_t
+ }
+ static MP_DEFINE_CONST_FUN_OBJ_3(machine_sdcard_ioctl_obj, machine_sdcard_ioctl);
+ 
++#if SOC_SDMMC_HOST_SUPPORTED
++// Re-initialise the SDMMC *slot* in place after a hotplug removal, so a
++// physically reinserted (power-cycled) card re-enumerates without a reboot.
++//
++// The esp-idf SDMMC host is a process-wide singleton: every machine.SDCard
++// shares one global host context + one transaction mutex (s_request_mutex).
++// Tearing the host down (sd.deinit()/sdmmc_host_deinit()) to force a remount
++// frees that mutex out from under the live object -> use-after-free crash.
++// Instead we keep the single persistent object and re-run ONLY the slot init:
++// sdmmc_host_init_slot() reconfigures the pins and resets the slot to 400 kHz /
++// 1-bit probing state (what a fresh card needs), while leaving intr_handle and
++// s_request_mutex untouched. Re-calling it for the already-active slot does not
++// bump num_of_init_slots, so there is no refcount leak.
++//
++// Clearing CARD_INIT_DONE makes the next readblocks / ioctl(INIT) re-run
++// sdmmc_card_init() (CMD0/CMD8/ACMD41/CMD2/CMD3) against the fresh card.
++// SDMMC slots only; SPI-mode cards raise (they re-enumerate via reconstruction).
++// See docs/knowledge/esp32-p4-sdcard-hotplug-no-host-deinit.md.
++static mp_obj_t machine_sdcard_reinit_slot(mp_obj_t self_in) {
++    sdcard_card_obj_t *self = self_in;
++
++    if (self->host.flags & SDMMC_HOST_FLAG_SPI) {
++        mp_raise_ValueError(MP_ERROR_TEXT("reinit_slot is SDMMC-only"));
++    }
++    if (!(self->flags & SDCARD_CARD_FLAGS_HOST_INIT_DONE)) {
++        // Host was never brought up (or was deinit'd) -> nothing to re-slot.
++        mp_raise_OSError(MP_EINVAL);
++    }
++
++    check_esp_err(sdmmc_host_init_slot(self->host.slot, &self->slot_config));
++    self->flags &= ~SDCARD_CARD_FLAGS_CARD_INIT_DONE;
++
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_1(machine_sdcard_reinit_slot_obj, machine_sdcard_reinit_slot);
++#endif // SOC_SDMMC_HOST_SUPPORTED
++
+ static const mp_rom_map_elem_t machine_sdcard_locals_dict_table[] = {
+     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&sd_info_obj) },
+     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&sd_deinit_obj) },
+     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&sd_deinit_obj) },
++    #if SOC_SDMMC_HOST_SUPPORTED
++    { MP_ROM_QSTR(MP_QSTR_reinit_slot), MP_ROM_PTR(&machine_sdcard_reinit_slot_obj) },
++    #endif
+     // block device protocol
+     { MP_ROM_QSTR(MP_QSTR_readblocks), MP_ROM_PTR(&machine_sdcard_readblocks_obj) },
+     { MP_ROM_QSTR(MP_QSTR_writeblocks), MP_ROM_PTR(&machine_sdcard_writeblocks_obj) },
 diff --git a/ports/esp32/main.c b/ports/esp32/main.c
 index 12835f313..72d73323b 100644
 --- a/ports/esp32/main.c

@@ -39,10 +39,26 @@ globals().update({_k: getattr(_c, _k) for _k in dir(_c) if not _k.startswith("_"
 # baked Western floor + English.
 _SD_MOUNT = "/sd"
 _sd_ready = False
+_sd_dev = None                       # the live machine.SDCard object (None when unmounted)
+_sd_scratch = bytearray(512)         # preallocated one-sector probe buffer (no per-poll alloc)
+_SD_POLL_INTERVAL_MS = 1000          # min gap between hotplug bus probes
+_sd_last_poll = None
 
 
 def _ensure_sd():
-    global _sd_ready
+    """Mount the microSD at _SD_MOUNT if not already, holding the block device in _sd_dev.
+    Idempotent + fail-soft. The facade is the SINGLE owner of the /sd lifecycle (D-8): the
+    app delegates via sd_ensure()/sd_live()/sd_poll() rather than mounting itself, so there
+    is exactly one authority over the mount when hotplug adds umount/remount.
+
+    The SDCard object is constructed ONCE and kept for the device's lifetime. A hotplug
+    remount reuses it and re-mounts — it must NEVER be deinit()'d (that frees the SDMMC
+    host's transaction mutex, and the esp-idf re-init leaves it NULL → the next read
+    crashes; see docs/knowledge/esp32-p4-sdcard-hotplug-no-host-deinit.md). Re-enumeration
+    of a freshly-inserted card is handled by the C primitive _sd_dev.reinit_slot(), which
+    re-inits the SDMMC *slot* in place (restoring 400 kHz/1-bit probing) while keeping the
+    global host + mutex alive; the first read after remount then re-runs CMD0/enumeration."""
+    global _sd_ready, _sd_dev
     if _sd_ready:
         return True
     try:
@@ -52,14 +68,98 @@ def _ensure_sd():
     except OSError:
         pass
     try:
-        import machine
         import vfs
-        sd = machine.SDCard(slot=0, width=4)   # slot 0 = IOMUX; VDD via LDO_VO4
-        vfs.mount(vfs.VfsFat(sd), _SD_MOUNT)
+        if _sd_dev is None:
+            import machine
+            _sd_dev = machine.SDCard(slot=0, width=4)   # slot 0 = IOMUX; VDD via LDO_VO4
+        else:
+            # Remount after a hotplug removal: re-init the SDMMC *slot* in place so a
+            # freshly-powered (reinserted) card re-enumerates. Construction ran the slot
+            # init once; reusing the object never does, so the slot stays at the previous
+            # card's clock/width and a fresh card can't probe (EBUSY). reinit_slot()
+            # restores 400 kHz/1-bit probing without touching the global host + mutex. If
+            # the card is still absent, the mount below fails and we retry next poll.
+            try:
+                _sd_dev.reinit_slot()
+            except Exception:
+                pass
+        vfs.mount(vfs.VfsFat(_sd_dev), _SD_MOUNT)        # first read re-enumerates a fresh card
         _sd_ready = True
     except Exception:
-        _sd_ready = False
+        _sd_ready = False              # keep _sd_dev; a later poll retries the remount
     return _sd_ready
+
+
+def sd_ensure():
+    """Public: ensure /sd is mounted; returns whether it is. The app's
+    MicroSD.ensure_mounted() delegates here so the facade stays the single mounter."""
+    return _ensure_sd()
+
+
+def sd_live():
+    """Public: honest "is /sd usable right now". A bare os.stat(/sd) stays True after a
+    physical pull (the mount registration lingers); this probes the card itself (read
+    sector 0) so a gone card reads False. Backs the app's ESP MicroSD.is_inserted."""
+    if not _sd_ready:
+        return False
+    dev = _sd_dev
+    if dev is None:
+        # Mounted but we don't hold the handle (shouldn't happen under single-owner) —
+        # fall back to the registration check.
+        try:
+            os.stat(_SD_MOUNT)
+            return True
+        except OSError:
+            return False
+    try:
+        return bool(dev.readblocks(0, _sd_scratch))
+    except Exception:
+        return False
+
+
+def sd_poll():
+    """Public: microSD hotplug tick, called from the app's LVGL pump loop. Self-throttled
+    to _SD_POLL_INTERVAL_MS so the pump can call it every iteration cheaply. Returns
+    "removed" or "inserted" on a state change (having umounted / remounted /sd), else None.
+    The facade owns the umount-on-remove / remount-on-insert; the quiescent-point,
+    GIL-serialized call site (no other thread touches the SD) makes the umount safe."""
+    global _sd_ready, _sd_dev, _sd_last_poll
+    import time
+    now = time.ticks_ms()
+    if _sd_last_poll is not None and time.ticks_diff(now, _sd_last_poll) < _SD_POLL_INTERVAL_MS:
+        return None
+    _sd_last_poll = now
+
+    if _sd_ready:
+        if sd_live():
+            return None                # still present
+        # Removal: drop the stale FS mount so is_inserted reads false and later opens fail
+        # cleanly instead of reading a gone card. No open handles at this quiescent point,
+        # so the umount is metadata-only; swallow any error regardless. Then clear the
+        # CACHED card-init (ioctl DEINIT) defensively so no stale read is served while the
+        # card is out (the actual slot re-init on reinsert is done by reinit_slot() in
+        # _ensure_sd). Do NOT deinit the SDCard/host — that frees the SDMMC transaction
+        # mutex and the re-init leaves it NULL, crashing the next read
+        # (docs/knowledge/esp32-p4-sdcard-hotplug-no-host-deinit.md). The host is idle while
+        # the card is out; the LDO rail is held for life regardless.
+        try:
+            import vfs
+            vfs.umount(_SD_MOUNT)
+        except Exception:
+            pass
+        dev = _sd_dev
+        if dev is not None:
+            try:
+                dev.ioctl(2, 0)        # MP_BLOCKDEV_IOCTL_DEINIT: clear cached card-init only
+            except Exception:
+                pass
+        _sd_ready = False
+        return "removed"
+
+    # Unmounted: try to (re)mount a freshly-inserted card.
+    if _ensure_sd():
+        return "inserted"
+    return None
 
 
 def _resolve(font_dir):
