@@ -310,11 +310,17 @@ def set_locale(locale, font_dir="lang-packs"):
         return False
 
 
-def locale_picker_screen(cfg=None):
+def settings_locale_picker_screen(cfg=None):
     """The language-selection screen. Stages each image row's pre-rendered endonym
     image (endonym_<active-height>.bin) off the SD, keyed "<locale>/<file>", and hands
     the dict to the C screen -- which paints the native-script names with no runtime
-    font. Live-text (Latin) rows carry no "image" and need no staging."""
+    font. Live-text (Latin) rows carry no "image" and need no staging.
+
+    Named to match the native binding (`_c.settings_locale_picker_screen`) so this
+    wrapper OVERRIDES the plain re-export (globals().update above) and the app's
+    `run_screen("settings_locale_picker_screen", ...)` dispatch lands here -- otherwise
+    the app calls the raw binding with no endonym_images and non-Latin names render
+    blank. The binding wires its endonym image provider only when the dict is passed."""
     cfg = cfg or {}
     base = _resolve(cfg.get("font_dir"))
     endonym_images = {}
@@ -329,7 +335,7 @@ def locale_picker_screen(cfg=None):
             data = _read(base + "/" + locale + "/" + fn)
             if data is not None:
                 endonym_images[locale + "/" + fn] = data
-    _c.locale_picker_screen(cfg, endonym_images)
+    return _c.settings_locale_picker_screen(cfg, endonym_images)
 
 
 # Mount the card at import so pack reads (and the app's gettext .mo open() under the
