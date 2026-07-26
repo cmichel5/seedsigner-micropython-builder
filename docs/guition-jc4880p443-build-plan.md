@@ -52,7 +52,15 @@ This plan is self-contained: the full pinmap is below so it survives even if the
    - Gotchas (repo memory): run `esptool flash_id` **first** to confirm port/chip; **never** pipe `esptool write_flash | head` (SIGPIPE → partial flash); P4 console is on UART0 (GPIO37/38) and the board also enumerates USB — confirm which port is which.
 5. **Validate:** boot logo / UI renders; touch responds. (No camera/SD yet.)
 
-## Phase 2 — camera (OV02C10)
+## Phase 2 — camera (OV02C10) ✅ DONE (device-validated)
+
+**Status:** complete — OV02C10 detected, live preview, animated-QR scanning, and the
+image-entropy still all work with correct orientation + full color. Driver added as the
+standalone `board_common/components/ov02c10/` add-on (see its `PROVENANCE.md`); orientation
+fixed via `BOARD_CAMERA_ROTATION 180` + `BOARD_CAMERA_MIRROR_Y 1` (PPA, not sensor — OV02C10
+is RAW-Bayer so sensor flips wreck the demosaic). Remaining polish (exposure AE + boot-color)
+is tracked in [guition-camera-followups.md](guition-camera-followups.md). Original plan notes
+below kept for reference.
 
 - **Confirm on-device:** `i2c` scan the GPIO7/8 bus → expect the sensor near **0x36**.
 - **Driver:** the vendor zip bundles `esp_cam_sensor` with an **ov02c10** driver + P4 IPA JSON (`1-Demo/idf_examples/components/esp_cam_sensor/sensors/ov02c10/`). Check whether the upstream `esp_cam_sensor` our `board_common` camera pipeline pulls already includes OV02C10; if not, port the vendor's `ov02c10.c` + `cfg/*.json` in (self-contained sensor add — see eval doc §6).

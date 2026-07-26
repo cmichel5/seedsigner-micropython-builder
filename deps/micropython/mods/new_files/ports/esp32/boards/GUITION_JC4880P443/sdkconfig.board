@@ -6,17 +6,29 @@
 CONFIG_SPIRAM_MEMTEST=y
 CONFIG_SPIRAM_IGNORE_NOTFOUND=n
 
-# ── Camera (MIPI-CSI, OV5647) ──────────────────────────────────────────────
+# ── Camera (MIPI-CSI, OV02C10) ─────────────────────────────────────────────
 # The esp_video CSI/ISP video devices are pulled in by board_common, but the
-# SENSOR DRIVER (esp_cam_sensor OV5647) and the ISP pipeline controller are
-# per-application Kconfig — board_common's shared fragment only carries pins, so
-# each app enables them in its own sdkconfig (e.g. scan_coord_test). Without the
-# sensor driver, esp_video_init() returns OK but detects no sensor and registers
-# NO /dev/video0, so cam_pipeline_create() fails at open("/dev/video0"). These
-# three match scan_coord_test's proven set (the camera_scanner module needs them).
-# See docs/knowledge/esp32-p4-camera-missing-sensor-kconfig.md.
-CONFIG_CAMERA_OV5647=y
-CONFIG_CAMERA_OV5647_MIPI_RAW10_1280x960_BINNING_45FPS=y
+# SENSOR DRIVER and the ISP pipeline controller are per-application Kconfig —
+# board_common's shared fragment only carries pins, so each build enables them
+# here. Without the sensor driver, esp_video_init() returns OK but detects no
+# sensor and registers NO /dev/video0, so cam_pipeline_create() fails at
+# open("/dev/video0"). See docs/knowledge/esp32-p4-camera-missing-sensor-kconfig.md.
+#
+# This board's sensor is the OV02C10 (the Waveshare twin's is OV5647). Its driver
+# is the standalone board_common/components/ov02c10 add-on, selected below (OV02C10
+# is absent from the public esp_cam_sensor component). OV5647 is left OFF because it
+# shares SCCB address 0x36 with the OV02C10 — only one sensor may be auto-detectable
+# per firmware. Values mirror the board vendor's working config: 1288x728 RAW10
+# default format, analog-gain priority, and XCLK from the P4 internal clock router
+# (not a LEDC GPIO — the module self-clocks off the CSI master clock, no XCLK pin).
+# CONFIG_CAMERA_OV5647 is not set
+CONFIG_CAMERA_OV02C10=y
+CONFIG_CAMERA_OV02C10_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
+CONFIG_CAMERA_OV02C10_MIPI_RAW10_1288X728_30FPS=y
+CONFIG_CAMERA_OV02C10_MIPI_DEFAULT_FMT_RAW10_1288X728_30FPS=y
+CONFIG_CAMERA_OV02C10_ANA_GAIN_PRIORITY=y
+# CONFIG_CAMERA_XCLK_USE_LEDC is not set
+CONFIG_CAMERA_XCLK_USE_ESP_CLOCK_ROUTER=y
 CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=y
 # Camera RUNTIME requirements (also from scan_coord_test). Without these the
 # sensor is detected but stream-start hangs/crashes:
