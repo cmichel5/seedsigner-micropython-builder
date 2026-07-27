@@ -39,8 +39,58 @@ jobs:
         # Mirrors GitLab/Forgejo, which already pin the kdmukai-bot registries.
         run: echo "owner_lc=kdmukai-bot" >> "$GITHUB_OUTPUT"
 
+  build-packs:
+    # Build the full language-pack collection so the merge-to-main dist ships fully
+    # localized (packs baked into the vfs at /lang-packs/<locale>/...). This runs on a
+    # PLAIN runner, NOT in the firmware base-image container: the pack producer is a
+    # Docker image (scripts/build_packs.sh -> the pinned seedsigner-langpack-builder),
+    # and the `build` job's container has no Docker socket. The container job downloads
+    # the artifact this uploads and bakes it via `make dist`.
+    #
+    # Gated on push: PRs stay compile-only (no dist packaging), so building packs there
+    # would be wasted work. See docs/ci-bake-full-langpacks-todo.md.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout seedsigner-language-packs (pinned, with submodules)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: kdmukAI-bot/seedsigner-language-packs
+          # Pin the pack source for REPRODUCIBLE dists: a builder-repo commit fully
+          # determines the baked packs. Its seedsigner-translations submodule (the
+          # on-device .mo source) rides along at the pinned commit. Bump this ref
+          # deliberately when translations or locale policy change.
+          ref: 53ffccf85b3cc0b30eb1793ede773e25d22f18e1
+          submodules: recursive
+
+      - name: Build language packs (pinned reproducible Docker image)
+        # build_packs.sh pulls the public, digest-pinned pack-builder image and runs the
+        # producer inside it -> byte-identical output. Writes <out-dir>/<locale>/...
+        # (English has no pack: it is the baked source-language floor).
+        run: scripts/build_packs.sh --out-dir "$GITHUB_WORKSPACE/lang-packs"
+
+      - name: Sanity-check the built collection
+        run: |
+          n=$(find "$GITHUB_WORKSPACE/lang-packs" -mindepth 1 -maxdepth 1 -type d | wc -l)
+          echo "built $n locale pack(s)"
+          # Guard against a silent English-only build (empty/near-empty collection).
+          test "$n" -ge 2
+
+      - name: Upload language packs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lang-packs
+          path: lang-packs/
+          if-no-files-found: error
+          retention-days: 1
+
   build:
-    needs: resolve-image-owner
+    needs: [resolve-image-owner, build-packs]
     runs-on: ubuntu-24.04
     # Build every supported ESP32-P4 board. All three are esp32p4 (RISC-V), so
     # they share the toolchain installed below; only the board definition differs.
@@ -175,16 +225,43 @@ jobs:
             echo "cmake=$(cmake --version | head -n1)"
           } | tee logs/provenance.txt
 
-      - name: Package flashable dist (merge to main only)
-        # Firmware + baked /main.py launcher image -> dist/<BOARD>/ with a flash_args
-        # that includes the vfs partition, so `esptool write_flash @flash_args` yields
-        # a board that boots the app on first power-up (no REPL).
-        # TODO: this dist is English-only -- the language packs are NOT baked in CI (no
-        # SS_PACKS_DIR here, and src/lang-packs is a gitignored built artifact absent from
-        # the pinned app submodule). To ship fully-localized dists, build/stage the pack
-        # collection and point this step at it. See docs/ci-bake-full-langpacks-todo.md.
+      - name: Download language packs (merge to main only)
+        # The collection built by the build-packs job (plain runner). Lands the locale
+        # dirs under lang-packs-staging/ for the dist bake below.
         if: github.event_name == 'push'
-        run: make dist BOARD="$BOARD"
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: lang-packs
+          path: lang-packs-staging
+
+      - name: Package flashable dist (merge to main only)
+        # Firmware + baked /main.py launcher image + language packs -> dist/<BOARD>/ with
+        # a flash_args that includes the vfs partition, so `esptool write_flash @flash_args`
+        # yields a board that boots the FULLY LOCALIZED app on first power-up (no REPL,
+        # no microSD). The packs come from the build-packs job's artifact; make dist bakes
+        # them into the vfs via SS_PACKS_DIR (resolve_packs()). See
+        # docs/ci-bake-full-langpacks-todo.md and BUILDER-13.
+        if: github.event_name == 'push'
+        run: |
+          staging="$GITHUB_WORKSPACE/lang-packs-staging"
+          # Locate the dir that holds the locale packs (each is <locale>/manifest.json),
+          # tolerant of any extra nesting the artifact packaging introduces.
+          manifest="$(find "$staging" -name manifest.json -print -quit 2>/dev/null || true)"
+          if [ -z "$manifest" ]; then
+            echo "::error::no language packs found under $staging (English-only would ship)"
+            ls -R "$staging" 2>/dev/null || true
+            exit 1
+          fi
+          packs_dir="$(dirname "$(dirname "$manifest")")"
+          echo "[dist] baking packs from $packs_dir"
+          SS_PACKS_DIR="$packs_dir" make dist BOARD="$BOARD"
+          # Verify the localized image actually baked: a launcher-only (English) vfs is
+          # ~tens of KB; the full pack collection pushes vfs.bin well past 1 MB.
+          vfs="dist/$BOARD/vfs.bin"
+          test -f "$vfs"
+          sz=$(stat -c%s "$vfs")
+          echo "[dist] $vfs = $sz bytes"
+          test "$sz" -gt 1000000
 
       - name: Upload flashable dist (merge to main only)
         if: github.event_name == 'push'
