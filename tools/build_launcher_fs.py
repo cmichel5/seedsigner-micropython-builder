@@ -18,12 +18,20 @@ fully determined by build artifacts:
 The image is produced by tools/mklittlefs_launcher.c, compiled against MicroPython's
 OWN vendored littlefs2 so the on-disk format matches the firmware exactly.
 
+The image also bakes the language packs (fonts, .mo catalogs, endonym images,
+manifests) under /lang-packs/<locale>/... so a freshly flashed device is fully
+localized with NO microSD card. The pack SOURCE is the app's bundled bytes
+(_devenv.resolve_packs() = $SS_APP_DIR/src/lang-packs); the runtime file subset is the
+SAME one tools/sd_format_push.py stages to the SD (both go through _langpacks). An
+absent/empty packs dir bakes /main.py only (a valid English-only image).
+
 Usage (dist integration — derive geometry from a build, emit vfs.bin, extend flash_args):
     python3 tools/build_launcher_fs.py --board <BOARD> \
         --build-dir build/<BOARD> --dist-dir dist/<BOARD>
 
-Usage (standalone / testing — explicit geometry):
-    python3 tools/build_launcher_fs.py --offset 0xC50000 --flash-size 32MB --out /tmp/vfs.bin
+Usage (standalone / testing — explicit geometry; --no-packs bakes the launcher only):
+    python3 tools/build_launcher_fs.py --offset 0xC50000 --flash-size 32MB \
+        --out /tmp/vfs.bin --no-packs
 """
 import argparse
 import os
@@ -34,12 +42,16 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _launcher import MAIN_PY  # noqa: E402  (the single launcher definition all writers share)
+import _devenv    # noqa: E402  (resolve_packs(): the app's bundled pack bytes)
+import _langpacks  # noqa: E402 (the shared runtime-pack file selection, also used by the SD stage)
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LFS_DIR = os.path.join(REPO_ROOT, "deps", "micropython", "upstream", "lib", "littlefs")
 MKLFS_SRC = os.path.join(REPO_ROOT, "tools", "mklittlefs_launcher.c")
 BLOCK_SIZE = 4096          # esp32 Partition NATIVE_BLOCK_SIZE_BYTES (littlefs block_size)
 LAUNCHER_NAME = "main.py"  # littlefs root-relative; boot runs cwd-relative "main.py" at "/"
+PACK_ROOT = "lang-packs"   # fs-root relative -> firmware reads /lang-packs/<locale>/...
+                           # (matches the app's on-board get_catalog_root() = "/lang-packs")
 
 # esp-idf partition-table entry: <2s magic 0x50AA><B type><B subtype><I offset><I size>
 # <16s label><I flags> = 32 bytes. The table ends at the first non-0x50AA entry
@@ -111,7 +123,7 @@ def compile_tool():
     return out
 
 
-def build_image(out_path, offset, flash_size):
+def build_image(out_path, offset, flash_size, packs_dir=None):
     if flash_size <= offset:
         _die("flash size 0x%x <= vfs offset 0x%x — no room for a vfs partition"
              % (flash_size, offset))
@@ -120,19 +132,55 @@ def build_image(out_path, offset, flash_size):
         _die("vfs size 0x%x not a multiple of block size %d" % (size, BLOCK_SIZE))
     block_count = size // BLOCK_SIZE
 
+    # Assemble the image contents as a manifest of (host_src, lfs_dest) entries:
+    # /main.py plus every runtime language-pack file, each baked under PACK_ROOT so it
+    # lands at /lang-packs/<locale>/... on device.
+    pack_files = _langpacks.collect_pack_files(packs_dir) if packs_dir else []
+    pack_bytes = sum(_safe_size(h) for h, _rel in pack_files)
+
     tool = compile_tool()
-    # Write the launcher content to a temp file for the C tool to embed as /main.py.
-    fd, main_py = tempfile.mkstemp(prefix="main_py_", suffix=".txt")
+    tmp_paths = []
     try:
+        # The launcher content lives only in _launcher.MAIN_PY -> stage it to a temp file.
+        fd, main_py = tempfile.mkstemp(prefix="main_py_", suffix=".txt")
+        tmp_paths.append(main_py)
         with os.fdopen(fd, "wb") as f:
             f.write(MAIN_PY.encode("utf-8"))
-        cmd = [tool, out_path, str(BLOCK_SIZE), str(block_count), main_py, LAUNCHER_NAME]
+
+        entries = [(main_py, LAUNCHER_NAME)]
+        entries += [(host, PACK_ROOT + "/" + rel) for host, rel in pack_files]
+
+        fd, manifest = tempfile.mkstemp(prefix="vfs_manifest_", suffix=".tsv")
+        tmp_paths.append(manifest)
+        with os.fdopen(fd, "w") as f:
+            for src, dest in entries:
+                f.write("%s\t%s\n" % (src, dest))
+
+        cmd = [tool, out_path, str(BLOCK_SIZE), str(block_count), manifest]
         subprocess.run(cmd, check=True)
     finally:
-        os.remove(main_py)
+        for p in tmp_paths:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+    if pack_files:
+        n_loc = len({rel.split("/", 1)[0] for _h, rel in pack_files})
+        print("[build-launcher-fs] baked /main.py + %d pack file(s) across %d locale(s), "
+              "%d bytes, under /%s/" % (len(pack_files), n_loc, pack_bytes, PACK_ROOT))
+    else:
+        print("[build-launcher-fs] baked /main.py only (no language packs -> English-only)")
     print("[build-launcher-fs] vfs image: %s  (offset 0x%x, vfs size 0x%x = %d blocks, flash 0x%x)"
           % (out_path, offset, size, block_count, flash_size))
     return offset
+
+
+def _safe_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
 
 
 def append_flash_args(flash_args_path, offset, image_basename):
@@ -159,6 +207,10 @@ def main():
     ap.add_argument("--flash-size", help="explicit flash size (e.g. 32MB / 0x2000000) — overrides derivation")
     ap.add_argument("--no-flash-args", action="store_true",
                     help="only emit the image; do not touch flash_args")
+    ap.add_argument("--packs", help="language-pack source dir (<locale>/...); "
+                    "default = _devenv.resolve_packs() ($SS_APP_DIR/src/lang-packs)")
+    ap.add_argument("--no-packs", action="store_true",
+                    help="bake the /main.py launcher only (no language packs -> English-only image)")
     args = ap.parse_args()
 
     # Geometry: explicit args win; otherwise derive from the build artifacts.
@@ -184,7 +236,14 @@ def main():
         out_path = os.path.join(args.dist_dir, "vfs.bin")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 
-    build_image(out_path, offset, flash_size)
+    # Pack source: --no-packs > --packs > _devenv default (the app's bundled packs). An
+    # absent/empty dir bakes /main.py only (English-only), so this never errors on a miss.
+    if args.no_packs:
+        packs_dir = None
+    else:
+        packs_dir = args.packs or _devenv.resolve_packs()
+
+    build_image(out_path, offset, flash_size, packs_dir)
 
     if not args.no_flash_args and args.dist_dir:
         append_flash_args(os.path.join(args.dist_dir, "flash_args"), offset,

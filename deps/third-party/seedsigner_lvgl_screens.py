@@ -163,14 +163,25 @@ def sd_poll():
 
 
 def _resolve(font_dir):
-    """Absolute on-SD path for the app's pack root. A relative dir (the shared
-    "lang-packs" constant) resolves under the SD mount; an absolute dir passes
-    through (a host that sets LOCALE_PACK_DIR to a full path)."""
+    """Absolute path for the app's pack root. An absolute dir passes through -- this is how
+    the app selects the store: "/lang-packs" (packs baked into the on-board vfs) or "/sd"
+    (the microSD). A relative dir resolves under the SD mount (legacy default)."""
     if not font_dir:
         font_dir = "lang-packs"
     if font_dir.startswith("/"):
         return font_dir
     return _SD_MOUNT + "/" + font_dir
+
+
+def _ensure_base(base):
+    """Ensure `base` (a resolved pack root) is readable. An on-board pack root lives in the
+    internal vfs, always mounted at "/", so it needs no card -- this is what lets the app
+    read the baked /lang-packs packs with NO microSD inserted. Only an SD-anchored base
+    requires the card be mounted. (SD-first override precedence over an on-board copy is a
+    later phase; today the app passes one root.)"""
+    if base == _SD_MOUNT or base.startswith(_SD_MOUNT + "/"):
+        return _ensure_sd()
+    return True
 
 
 def _is_junk(name):
@@ -213,7 +224,7 @@ def discover_locale_packs(font_dir="lang-packs"):
     firmware. Returns the count registered (0 when the card is absent). Defensive:
     a bad/half-copied manifest is skipped, never fatal."""
     base = _resolve(font_dir)
-    if not _ensure_sd():
+    if not _ensure_base(base):
         return 0
     try:
         _c.clear_pack_manifests()
@@ -241,7 +252,7 @@ def list_available_locales(font_dir="lang-packs"):
     already knows those locales. Empty list when the card is absent."""
     base = _resolve(font_dir)
     out = []
-    if not _ensure_sd():
+    if not _ensure_base(base):
         return out
     height = _active_height()
     for name in _listdir(base):
@@ -285,9 +296,9 @@ def set_locale(locale, font_dir="lang-packs"):
         return True
     base = _resolve(font_dir)
     pack_dir = base + "/" + locale
-    if _ensure_sd():
-        # Register the SD manifest (if present) so an SD-only locale becomes loadable
-        # and locale_pack_files() knows its files (an SD pack overrides a compiled one).
+    if _ensure_base(base):
+        # Register the pack's manifest (if present) so a pack-only locale becomes loadable
+        # and locale_pack_files() knows its files (a pack manifest overrides a compiled one).
         mbytes = _read(pack_dir + "/manifest.json")
         if mbytes is not None:
             try:
@@ -324,7 +335,7 @@ def settings_locale_picker_screen(cfg=None):
     cfg = cfg or {}
     base = _resolve(cfg.get("font_dir"))
     endonym_images = {}
-    if _ensure_sd():
+    if _ensure_base(base):
         height = _active_height()
         for row in cfg.get("rows", []):
             img = row.get("image")

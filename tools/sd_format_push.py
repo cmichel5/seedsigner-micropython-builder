@@ -28,23 +28,9 @@ import serial  # pyserial
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _devenv  # env-driven local-dev paths (no hard-coded /home/... in committed files)
+import _langpacks  # shared "which pack files the device loads" (also used by the vfs bake)
 
 PORT = "/dev/ttyACM0"
-
-
-def _is_runtime_file(rel):
-    """True for a pack file the DEVICE loads, keyed by its path relative to the pack
-    root ("<locale>/..."). Stages the subset font(s), pre-shaped runs, endonym images,
-    the self-describing manifest, and the compiled catalog at its LC_MESSAGES subpath;
-    skips debug artifacts (runs.json)."""
-    base = rel.rsplit("/", 1)[-1]
-    if rel.endswith("/LC_MESSAGES/messages.mo"):
-        return True
-    if base in ("manifest.json", "runs.bin"):
-        return True
-    if base.endswith(".ttf"):
-        return True
-    return base.startswith("endonym_") and base.endswith(".bin")
 
 
 def _read_until(ser, token, deadline):
@@ -116,26 +102,6 @@ def hard_reset_and_wait(port, do_reset=True):
     raise SystemExit("device did not return to REPL after reset")
 
 
-def collect_pack_files(packs_dir):
-    """Every runtime file across all locale packs under `packs_dir`, as
-    (host_path, relpath) where relpath is "<locale>/..." (LC_MESSAGES/ preserved).
-    Debug artifacts (runs.json) are skipped by _is_runtime_file."""
-    rels = []
-    if os.path.isdir(packs_dir):
-        for loc in sorted(os.listdir(packs_dir)):
-            loc_dir = os.path.join(packs_dir, loc)
-            if loc.startswith(".") or not os.path.isdir(loc_dir):
-                continue
-            for root, _dirs, fnames in os.walk(loc_dir):
-                for fn in fnames:
-                    full = os.path.join(root, fn)
-                    rel = os.path.relpath(full, packs_dir).replace(os.sep, "/")
-                    if _is_runtime_file(rel):
-                        rels.append((full, rel))
-    rels.sort(key=lambda fr: fr[1])
-    return rels
-
-
 def _push_file(ser, remote, data, chunk=12000):
     """Write `data` to `remote` on-device, chunking the base64 (in multiples of 4 chars,
     so each fragment decodes standalone) — a large font sent as one USB-CDC write
@@ -166,7 +132,7 @@ def main():
     # Enumerate the source BEFORE touching the card. Empty/absent is NOT an error: the app
     # bundles no packs -> a valid English-only deploy (we format a clean card, stage nothing;
     # the app renders its baked English floor). This repo only COPIES the app's bundled bytes.
-    rels = collect_pack_files(packs)
+    rels = _langpacks.collect_pack_files(packs)
     if rels:
         n_locales = len({rel.split("/", 1)[0] for _f, rel in rels})
         print("[sd] staging %d files across %d locales from %s" % (len(rels), n_locales, packs))
