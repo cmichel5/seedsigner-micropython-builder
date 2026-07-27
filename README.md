@@ -2,6 +2,19 @@
 
 Build orchestration repo for SeedSigner MicroPython firmware without maintaining long-lived forks.
 
+## Supported hardware
+
+| Board | Manufacturer | Screen | Price | Status |
+|---|---|---|---|---|
+| [ESP32-P4-WIFI6-Touch-LCD-4.3](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4.3.htm) | Waveshare | 4.3″ | [$43](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4.3.htm?sku=33875) | ✅ Supported · ⭐ **Recommended** |
+| [JC4880P443](https://www.aliexpress.us/item/3256809431944589.html) | Guition | 4.3″ | $35 | ✅ Supported |
+| [ESP32-P4-WIFI6-Touch-LCD-3.5](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-3.5.htm) | Waveshare | 3.5″ | [$38](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-3.5.htm?sku=33511) | ✅ Supported |
+| [ESP32-P4-WIFI6-Touch-LCD-5](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-5.htm) | Waveshare | 5″ | [$53](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-5.htm?sku=33763) | 🚧 Planned |
+| [ESP32-S3-Touch-LCD-3.5B](https://www.waveshare.com/esp32-s3-touch-lcd-3.5b.htm) | Waveshare | 3.5″ | — | 🔬 Under evaluation |
+
+Prices are list prices as of July 2026. See **[Board hardware details](docs/supported-hardware.md)**
+for per-board specs, enclosure options, and the display / performance differences.
+
 ## Repository roles
 
 - `deps/micropython/mods/` — overlay + patch set for MicroPython
