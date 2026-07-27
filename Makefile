@@ -44,6 +44,12 @@ DIST_DIR = dist/$(BOARD)
 # the REPL until a launcher is written; only useful for an app-less build).
 BAKE_LAUNCHER ?= 1
 
+# BAKE_PACKS=0 bakes the launcher WITHOUT the language packs (English-only image). By
+# default the packs (fonts + .mo catalogs + endonym images) are baked into the vfs at
+# /lang-packs/<locale>/... so a fresh flash is fully localized with no microSD. The pack
+# source is the app's bundled bytes (_devenv.resolve_packs() = $SS_APP_DIR/src/lang-packs).
+BAKE_PACKS ?= 1
+
 dist:
 	@if [ ! -f build/$(BOARD)/flash_args ]; then \
 		echo "ERROR: No build artifacts for BOARD=$(BOARD). Run: make docker-build-all"; \
@@ -55,12 +61,15 @@ dist:
 	cp build/$(BOARD)/micropython.bin $(DIST_DIR)/
 	cp build/$(BOARD)/bootloader/bootloader.bin $(DIST_DIR)/bootloader/
 	cp build/$(BOARD)/partition_table/partition-table.bin $(DIST_DIR)/partition_table/
-	@# Bake the frozen-app launcher into a littlefs2 image for the auto-vfs partition so a
-	@# fresh flash of this dist boots the app instead of the REPL. Geometry is derived from
-	@# the built partition table + flash_args; the vfs offset is appended to flash_args.
+	@# Bake the frozen-app launcher (/main.py) + language packs (/lang-packs/<locale>/...)
+	@# into a littlefs2 image for the auto-vfs partition so a fresh flash of this dist boots
+	@# the app, fully localized, with no microSD. Geometry is derived from the built
+	@# partition table + flash_args; the vfs offset is appended to flash_args. BAKE_PACKS=0
+	@# bakes the launcher only (English-only image).
 	@if [ "$(BAKE_LAUNCHER)" = "1" ]; then \
+		if [ "$(BAKE_PACKS)" = "1" ]; then PACKS_ARG=""; else PACKS_ARG="--no-packs"; fi; \
 		python3 tools/build_launcher_fs.py --board $(BOARD) \
-			--build-dir build/$(BOARD) --dist-dir $(DIST_DIR); \
+			--build-dir build/$(BOARD) --dist-dir $(DIST_DIR) $$PACKS_ARG; \
 	else \
 		echo "[dist] BAKE_LAUNCHER=0 -> firmware-only dist (no /main.py; boots to REPL)"; \
 	fi
