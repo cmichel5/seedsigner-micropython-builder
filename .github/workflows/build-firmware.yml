@@ -42,6 +42,19 @@ jobs:
   build:
     needs: resolve-image-owner
     runs-on: ubuntu-24.04
+    # Build every supported ESP32-P4 board. All three are esp32p4 (RISC-V), so
+    # they share the toolchain installed below; only the board definition differs.
+    # fail-fast: false so one board's failure doesn't cancel the others' builds.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43
+            artifact: flashable-dist-waveshare-esp32-p4-43
+          - board: GUITION_JC4880P443
+            artifact: flashable-dist-guition-jc4880p443
+          - board: WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_35
+            artifact: flashable-dist-waveshare-esp32-p4-35
     defaults:
       run:
         shell: bash
@@ -49,9 +62,9 @@ jobs:
       IDF_PATH: /opt/toolchains/esp-idf
       IDF_DIR: /opt/toolchains/esp-idf
       IDF_TOOLS_PATH: /opt/espressif
-      # ESP32-P4 is the first-release target; CI builds the P4 board (RISC-V).
+      # ESP32-P4 is the first-release target; CI builds the P4 boards (RISC-V).
       IDF_TOOLS_TARGETS: esp32p4
-      BOARD: WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43
+      BOARD: ${{ matrix.board }}
       # ccache: the launcher wiring is already in place -- the base image ships
       # ccache and build_firmware.sh passes IDF_CCACHE_ENABLE=1, which routes the
       # IDF CMake compiler launcher through ccache. What was missing is cross-run
@@ -173,5 +186,5 @@ jobs:
         if: github.event_name == 'push'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: flashable-dist-waveshare-esp32-p4
+          name: ${{ matrix.artifact }}
           path: dist/${{ env.BOARD }}/

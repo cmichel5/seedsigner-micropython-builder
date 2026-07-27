@@ -169,11 +169,12 @@ CI checks out this repo with `submodules: true` (populating `seedsigner-lvgl-scr
 `deps/micropython/upstream` at their pinned commits), applies mods, builds firmware, and
 uploads artifacts.
 
-**Pull requests** run a fast compile-only firmware check (the app is not frozen in). **On merge to
-`main`**, GitHub CI additionally stages the frozen app from the pinned `deps/seedsigner` /
+**Pull requests** run a fast compile-only firmware check for all three supported ESP32-P4 boards —
+the Waveshare 4.3″, the Guition JC4880P443, and the Waveshare 3.5″ (the app is not frozen in). **On
+merge to `main`**, GitHub CI additionally stages the frozen app from the pinned `deps/seedsigner` /
 `deps/embit` submodules, builds it in, and publishes a downloadable **`flashable-dist-*`** artifact
-for the ESP32-P4-43 — a self-booting image anyone can flash (see below). GitLab / Codeberg build the
-ESP32-S3 dev boards and skip the frozen-app bake for now.
+for each — self-booting images anyone can flash (see below). GitLab / Codeberg build the ESP32-S3 dev
+boards and skip the frozen-app bake for now.
 
 
 ## Build outputs
@@ -204,8 +205,9 @@ Logs are written under `logs/` with timestamp-first naming.
 There are two ways to get a flashable image.
 
 **1. Download a prebuilt image (easiest).** On merge to `main`, CI publishes a **`flashable-dist-*`**
-artifact for the ESP32-P4-43 (see [CI](#ci)). Download and unzip it — it contains the same
-`dist/<BOARD>/` layout as below and self-boots — then skip to [flashing](#flashing).
+artifact for each of the three supported ESP32-P4 boards — the Waveshare 4.3″ (primary), the Guition
+JC4880P443, and the Waveshare 3.5″ (see [CI](#ci)). Download and unzip the one for your board — it
+contains the same `dist/<BOARD>/` layout as below and self-boots — then skip to [flashing](#flashing).
 
 **2. Build it yourself.** Once the submodules are set up (see
 [Cloning and submodule setup](#cloning-and-submodule-setup)), building a flashable image is two
