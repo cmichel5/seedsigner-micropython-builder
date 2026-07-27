@@ -39,8 +39,14 @@ CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=y
 #    task; the 2048 default overflows.
 CONFIG_ESP_VIDEO_DISABLE_MIPI_CSI_DRIVER_BACKUP_BUFFER=n
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
-# CSI auto-exposure target (0 = ISP default; bright image decodes a binary QR best).
-CONFIG_BOARD_CSI_AE_TARGET=0
+# Fixed exposure override (raw sensor exposure, written to V4L2_CID_EXPOSURE at
+# camera start). The OV02C10 has NO on-sensor auto-exposure and no ISP IPA config
+# is wired, so exposure is otherwise pinned at the 1288x728 format default (~894 of
+# a ~1149 max) — which is much too bright, and non-adaptive. ~450 (roughly half)
+# dims the preview to a usable level; tune on device (lower = darker). This is the
+# stopgap; the proper adaptive fix is the vendor ISP IPA JSON (see
+# docs/guition-camera-followups.md). 0 would leave the over-bright default.
+CONFIG_BOARD_CSI_AE_TARGET=450
 # Route k_quirc decoder context + flood-fill scratch to PSRAM: keeps their ~80 KB
 # internal-RAM footprint off the fragmented internal heap so the camera QR-decode task
 # stack can reserve its contiguous block (defense-in-depth for the QR-task internal-RAM
