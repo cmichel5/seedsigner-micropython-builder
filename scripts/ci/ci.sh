@@ -99,8 +99,21 @@ case "$COMMAND" in
     ;;
 
   collect-dist)
-    # Package the flashable dist/<BOARD>/ (firmware + baked /main.py launcher
-    # image) and stage it under out/ for the platform's artifact upload.
+    # Package the flashable dist/<BOARD>/ (firmware + baked /main.py launcher + language
+    # packs) and stage it under out/ for the platform's artifact upload.
+    #
+    # Point the vfs bake at the app's bundled pack location. This is a SEPARATE ci.sh
+    # invocation from `stage-frozen`, so SS_APP_DIR isn't set here; name the pinned app
+    # submodule explicitly (init defensively; normally already present from the build).
+    #
+    # NOTE: src/lang-packs is a BUILT artifact (gitignored) produced by the separate
+    # seedsigner-language-packs repo -- the app, and therefore this submodule checkout, does
+    # NOT carry it. Until a pack-build step populates that dir in CI, the bake logs
+    # "English-only" and the dist ships the baked English floor (no error). Wiring the pack
+    # generator into CI is the follow-up -> docs/ci-bake-full-langpacks-todo.md.
+    git config --global --add safe.directory '*' 2>/dev/null || true
+    git submodule update --init deps/seedsigner
+    export SS_PACKS_DIR="$REPO_ROOT/deps/seedsigner/src/lang-packs"
     make dist BOARD="$BOARD"
     mkdir -p out/dist
     cp -r "dist/$BOARD" out/dist/

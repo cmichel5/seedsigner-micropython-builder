@@ -179,6 +179,10 @@ jobs:
         # Firmware + baked /main.py launcher image -> dist/<BOARD>/ with a flash_args
         # that includes the vfs partition, so `esptool write_flash @flash_args` yields
         # a board that boots the app on first power-up (no REPL).
+        # TODO: this dist is English-only -- the language packs are NOT baked in CI (no
+        # SS_PACKS_DIR here, and src/lang-packs is a gitignored built artifact absent from
+        # the pinned app submodule). To ship fully-localized dists, build/stage the pack
+        # collection and point this step at it. See docs/ci-bake-full-langpacks-todo.md.
         if: github.event_name == 'push'
         run: make dist BOARD="$BOARD"
 
