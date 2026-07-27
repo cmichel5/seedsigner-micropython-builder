@@ -1,0 +1,11 @@
+# Host-side Python dependencies for flashing and provisioning SeedSigner ESP32
+# firmware. These run on your host machine (NOT inside the Docker build
+# container), so install them into your host Python 3 environment:
+#
+#     pip install -r tools/requirements.txt
+#
+# The build toolchain itself (ESP-IDF, mpy-cross) stays containerized and is not
+# listed here -- see the README "Prebuilt base image" section.
+
+esptool         # writes firmware over serial: `python -m esptool ... write_flash @flash_args`
+pyserial>=3.5   # tools/ serial provisioning helpers (e.g. set_p4_boot_app.py) import `serial`

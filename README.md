@@ -230,6 +230,14 @@ make dist             BOARD=WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43
 
 ### Flashing
 
+Flashing runs on your **host**, not in the build container — it needs USB access to the board — so
+install the host-side Python tools first: `esptool` (the flasher) and `pyserial` (used by the
+`tools/` provisioning scripts). With Python 3:
+
+```bash
+pip install -r tools/requirements.txt   # or: pip install esptool pyserial
+```
+
 Flash from `dist/<BOARD>/`, using the generated offsets:
 
 ```bash
