@@ -22,12 +22,26 @@ static const char *TAG = "camera_entropy";
 #endif
 
 /* High-resolution entropy still, per board (P4 only): the latched final image is
- * a SQUARE at 2x the display square (960 on the P4-43, 640 on the P4-35), grabbed
- * by a second PPA pass, hashed full-resolution, and shown downsampled with pillar
- * bars. 0 = no still: latch the display-resolution preview square (S3 / no PPA).
+ * grabbed by a second PPA pass, hashed full-resolution, and shown downsampled +
+ * aspect-fit (image_entropy_process_filtered letter-/pillarboxes it). Two shapes:
+ *   - SQUARE (BOARD_ENTROPY_STILL_DIM = side): a centred square field of view at
+ *     2x the display square (e.g. 960 on the OV5647 P4-43, 640 on the P4-35), shown
+ *     pillarboxed on the landscape panel.
+ *   - WIDESCREEN (BOARD_ENTROPY_STILL_W x BOARD_ENTROPY_STILL_H): the sensor's FULL
+ *     field of view at the sensor aspect, shown letterboxed. Used where a big square
+ *     would need an unavailable upscale (the OV02C10 frame is only 1288x728 tall, so
+ *     a 960 square can't be grabbed) and to fill more of the landscape display.
+ * 0 = no still: latch the display-resolution preview square (S3 / no PPA).
+ * STILL_W/STILL_H default to the square DIM, so square boards are unchanged.
  * See docs/_integration/entropy-highres-still-todo.md. */
 #ifndef BOARD_ENTROPY_STILL_DIM
 #define BOARD_ENTROPY_STILL_DIM 0
+#endif
+#ifndef BOARD_ENTROPY_STILL_W
+#define BOARD_ENTROPY_STILL_W BOARD_ENTROPY_STILL_DIM
+#endif
+#ifndef BOARD_ENTROPY_STILL_H
+#define BOARD_ENTROPY_STILL_H BOARD_ENTROPY_STILL_DIM
 #endif
 
 #if BOARD_HAS_CAMERA
@@ -197,10 +211,11 @@ const char *cam_entropy_start(const uint8_t *seed_hash, size_t seed_len)
                           ? BOARD_DISP_H_RES : BOARD_DISP_V_RES;
     pcfg.display_width  = square;
     pcfg.display_height = square;
-    /* High-resolution square still (P4). 0 on boards without it → the pipeline
-     * allocates no still buffer and the consumer latches the preview square. */
-    pcfg.still_width  = BOARD_ENTROPY_STILL_DIM;
-    pcfg.still_height = BOARD_ENTROPY_STILL_DIM;
+    /* High-resolution still (P4), square or widescreen. 0 on boards without it →
+     * the pipeline allocates no still buffer and the consumer latches the preview
+     * square. */
+    pcfg.still_width  = BOARD_ENTROPY_STILL_W;
+    pcfg.still_height = BOARD_ENTROPY_STILL_H;
 
     s_pipeline = cam_pipeline_create(&pcfg);
     if (!s_pipeline) {
@@ -217,18 +232,18 @@ const char *cam_entropy_start(const uint8_t *seed_hash, size_t seed_len)
 
     s_frames = 0;
     s_square = square;  /* display/preview square (overlay geometry) */
-    /* The latched still is the high-res square when this board grabs one; else it
-     * is the preview square (the consumer reports which via get_result's len, but
-     * the confirm-image processing below wants the intended dims up front). */
-    uint32_t still_dim = BOARD_ENTROPY_STILL_DIM ? BOARD_ENTROPY_STILL_DIM : square;
-    s_still_w = still_dim;
-    s_still_h = still_dim;
+    /* The latched still is the high-res still (square or widescreen) when this board
+     * grabs one; else it is the preview square (the consumer reports which via
+     * get_result's len, but the confirm-image processing below wants the intended
+     * dims up front). */
+    s_still_w = BOARD_ENTROPY_STILL_W ? BOARD_ENTROPY_STILL_W : square;
+    s_still_h = BOARD_ENTROPY_STILL_H ? BOARD_ENTROPY_STILL_H : square;
     cam_pipeline_entropy_config_t ecfg = {};
     ecfg.pipeline     = s_pipeline;
     ecfg.frame_width  = square;                    /* preview frames (chained) */
     ecfg.frame_height = square;
-    ecfg.still_width  = BOARD_ENTROPY_STILL_DIM;   /* 0 → latch the preview square */
-    ecfg.still_height = BOARD_ENTROPY_STILL_DIM;
+    ecfg.still_width  = BOARD_ENTROPY_STILL_W;     /* 0 → latch the preview square */
+    ecfg.still_height = BOARD_ENTROPY_STILL_H;
     ecfg.seed_hash    = seed;
     ecfg.on_frame     = on_entropy_frame;
     ecfg.user_ctx     = NULL;

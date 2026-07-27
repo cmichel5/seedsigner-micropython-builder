@@ -105,6 +105,7 @@ if [ -z "${BOARD_CONFIG_DIR:-}" ]; then
     WAVESHARE_ESP32_S3_TOUCH_LCD_35)  BOARD_CONFIG_DIR="$BOARD_COMMON_DIR/boards/waveshare_s3_lcd35" ;;
     WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_35) BOARD_CONFIG_DIR="$BOARD_COMMON_DIR/boards/waveshare_p4_lcd35" ;;
     WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43) BOARD_CONFIG_DIR="$BOARD_COMMON_DIR/boards/waveshare_p4_lcd43" ;;
+    GUITION_JC4880P443) BOARD_CONFIG_DIR="$BOARD_COMMON_DIR/boards/guition_jc4880p443" ;;
     *) echo "WARNING: No board_common mapping for BOARD=$BOARD"; BOARD_CONFIG_DIR="" ;;
   esac
 fi
@@ -123,6 +124,7 @@ fi
 if [ -z "${SEEDSIGNER_DISPLAY_HEIGHT:-}" ]; then
   case "$BOARD" in
     WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43) SEEDSIGNER_DISPLAY_HEIGHT=480 ;;
+    GUITION_JC4880P443) SEEDSIGNER_DISPLAY_HEIGHT=480 ;;
     *) SEEDSIGNER_DISPLAY_HEIGHT=320 ;;
   esac
 fi
@@ -209,8 +211,9 @@ fi
   echo "Flash package: $FLASH_DIR"
   # Detect chip type from board name
   case "$BOARD" in
-    *ESP32_P4*) CHIP_TYPE="esp32p4" ;;
-    *)          CHIP_TYPE="esp32s3" ;;
+    *ESP32_P4*)         CHIP_TYPE="esp32p4" ;;
+    GUITION_JC4880P443) CHIP_TYPE="esp32p4" ;;
+    *)                  CHIP_TYPE="esp32s3" ;;
   esac
   echo "  Flash with: python -m esptool --chip $CHIP_TYPE write_flash @flash_args"
   ls -lhR "$FLASH_DIR"
