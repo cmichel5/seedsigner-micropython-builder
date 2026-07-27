@@ -108,12 +108,15 @@ case "$COMMAND" in
     #
     # NOTE: src/lang-packs is a BUILT artifact (gitignored) produced by the separate
     # seedsigner-language-packs repo -- the app, and therefore this submodule checkout, does
-    # NOT carry it. Until a pack-build step populates that dir in CI, the bake logs
-    # "English-only" and the dist ships the baked English floor (no error). Wiring the pack
-    # generator into CI is the follow-up -> docs/ci-bake-full-langpacks-todo.md.
+    # NOT carry it. So this default path bakes the English-only floor unless something has
+    # already populated SS_PACKS_DIR. The GitHub firmware workflow ships FULLY-LOCALIZED
+    # dists via a dedicated pack-build job (plain runner -> pack Docker image -> artifact)
+    # feeding SS_PACKS_DIR into `make dist` -- see .github/workflows/build-firmware.yml and
+    # docs/ci-bake-full-langpacks-todo.md. GitLab/Forgejo can mirror that pattern (build
+    # packs in a non-container stage, stage them here) when they enable the dist bake.
     git config --global --add safe.directory '*' 2>/dev/null || true
     git submodule update --init deps/seedsigner
-    export SS_PACKS_DIR="$REPO_ROOT/deps/seedsigner/src/lang-packs"
+    export SS_PACKS_DIR="${SS_PACKS_DIR:-$REPO_ROOT/deps/seedsigner/src/lang-packs}"
     make dist BOARD="$BOARD"
     mkdir -p out/dist
     cp -r "dist/$BOARD" out/dist/
