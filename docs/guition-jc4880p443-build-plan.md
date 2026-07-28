@@ -59,7 +59,7 @@ image-entropy still all work with correct orientation + full color. Driver added
 standalone `board_common/components/ov02c10/` add-on (see its `PROVENANCE.md`); orientation
 fixed via `BOARD_CAMERA_ROTATION 180` + `BOARD_CAMERA_MIRROR_Y 1` (PPA, not sensor — OV02C10
 is RAW-Bayer so sensor flips wreck the demosaic). Remaining polish (exposure AE + boot-color)
-is tracked in [guition-camera-followups.md](guition-camera-followups.md). Original plan notes
+is tracked in [knowledge/guition-jc4880p443-camera-tuning.md](knowledge/guition-jc4880p443-camera-tuning.md). Original plan notes
 below kept for reference.
 
 - **Confirm on-device:** `i2c` scan the GPIO7/8 bus → expect the sensor near **0x36**.

@@ -151,6 +151,31 @@ void cam_scanner_report_complete(void);
 void cam_scanner_begin_segments(int total_segments);
 void cam_scanner_segment_event(int status, int piece_index);
 
+/*
+ * Auto-exposure setpoint override — the image brightness the exposure loop aims
+ * for, on the ISP's 0-255 luma scale. 0 restores the board tuning file's own
+ * value. Takes effect on the next metered frame, so it can be swept while the
+ * camera is live.
+ *
+ * Board-global (one exposure loop serves every camera session) and a no-op on
+ * boards whose camera has no auto-exposure loop, where the getter reports 0.
+ * Scalar-only, so the binding layer can reach it without pulling in the pipeline
+ * headers.
+ */
+bool cam_scanner_set_ae_luma_target(uint8_t target);
+uint8_t cam_scanner_get_ae_luma_target(void);
+
+/*
+ * ISP tone curve: display gamma (x10, so 22 = 2.2; 0 leaves the ISP linear) plus
+ * the input level mapped to true black (0-64, compensating the sensor's own
+ * black offset). One hardware lookup table, so no per-frame cost. Applies
+ * immediately and persists for the boot.
+ */
+bool cam_scanner_set_tone(uint8_t gamma_x10, uint8_t black_level);
+
+/* ISP colour trim: saturation and contrast, 128 = neutral for both. */
+bool cam_scanner_set_color(uint8_t saturation, uint8_t contrast);
+
 #ifdef __cplusplus
 }
 #endif

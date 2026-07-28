@@ -217,6 +217,12 @@ const char *cam_entropy_start(const uint8_t *seed_hash, size_t seed_len)
     pcfg.still_width  = BOARD_ENTROPY_STILL_W;
     pcfg.still_height = BOARD_ENTROPY_STILL_H;
 
+    /* Meter exposure flat across the frame. The whole scene is the subject here —
+     * the user is pointing the camera at something textured to harvest entropy —
+     * so no part of the frame deserves more say than any other. Boards without an
+     * auto-exposure loop report NOT_SUPPORTED and keep their fixed exposure. */
+    board_pipeline_set_ae_metering(BOARD_CAM_AE_METERING_AVERAGE);
+
     s_pipeline = cam_pipeline_create(&pcfg);
     if (!s_pipeline) {
         cam_rollback_screen(prev_screen);
