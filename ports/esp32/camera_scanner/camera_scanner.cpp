@@ -481,6 +481,13 @@ const char *cam_scanner_start(bool focus_assist)
     }
 #endif
 
+    /* Meter exposure toward the middle of the frame. Users are told to fill the
+     * frame with the QR code, so the middle is the part that has to be legible;
+     * a bright lamp or a dark background at the edges would otherwise pull the
+     * exposure away from it and cost decodes. Boards without an auto-exposure
+     * loop report NOT_SUPPORTED and keep their fixed exposure. */
+    board_pipeline_set_ae_metering(BOARD_CAM_AE_METERING_CENTER);
+
     s_pipeline = cam_pipeline_create(&pcfg);
     if (!s_pipeline) {
         cam_rollback_screen(prev_screen);
@@ -886,6 +893,26 @@ void cam_scanner_segment_event(int status, int piece_index)
     }
 }
 
+bool cam_scanner_set_ae_luma_target(uint8_t target)
+{
+    return board_pipeline_set_ae_luma_target(target) == ESP_OK;
+}
+
+uint8_t cam_scanner_get_ae_luma_target(void)
+{
+    return board_pipeline_get_ae_luma_target();
+}
+
+bool cam_scanner_set_tone(uint8_t gamma_x10, uint8_t black_level)
+{
+    return board_pipeline_set_tone(gamma_x10, black_level) == ESP_OK;
+}
+
+bool cam_scanner_set_color(uint8_t saturation, uint8_t contrast)
+{
+    return board_pipeline_set_color(saturation, contrast) == ESP_OK;
+}
+
 #else /* !BOARD_HAS_CAMERA — bindings still link; start() reports the absence. */
 
 const char *cam_scanner_start(bool focus_assist) { (void)focus_assist; return "board has no camera"; }
@@ -898,5 +925,9 @@ void cam_scanner_report(int status, int percent) { (void)status; (void)percent; 
 void cam_scanner_report_complete(void) {}
 void cam_scanner_begin_segments(int total_segments) { (void)total_segments; }
 void cam_scanner_segment_event(int status, int piece_index) { (void)status; (void)piece_index; }
+bool cam_scanner_set_ae_luma_target(uint8_t target) { (void)target; return false; }
+uint8_t cam_scanner_get_ae_luma_target(void) { return 0; }
+bool cam_scanner_set_tone(uint8_t gamma_x10, uint8_t black_level) { (void)gamma_x10; (void)black_level; return false; }
+bool cam_scanner_set_color(uint8_t saturation, uint8_t contrast) { (void)saturation; (void)contrast; return false; }
 
 #endif /* BOARD_HAS_CAMERA */

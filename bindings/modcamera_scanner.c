@@ -178,6 +178,55 @@ static mp_obj_t mp_camera_scanner_segment_event(mp_obj_t status_obj, mp_obj_t pi
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(camera_scanner_segment_event_obj, mp_camera_scanner_segment_event);
 
+// set_ae_luma_target(n) -> bool. Auto-exposure setpoint on the ISP's 0-255 luma
+// scale; 0 restores the board tuning file's own value. Applies to the next metered
+// frame, so brightness can be swept while the preview runs. False on a board with
+// no auto-exposure loop, or for a value outside 4..251.
+//
+// Tuning/diagnostic surface, so it is compiled only into camera-debug builds —
+// mirroring the other CAM_PIPELINE_DEBUG-only instrumentation. A user-facing
+// exposure control would go through this same board_pipeline setter rather than
+// widening the release binding.
+#if CONFIG_CAM_PIPELINE_DEBUG
+static mp_obj_t mp_camera_scanner_set_ae_luma_target(mp_obj_t target_obj) {
+    mp_int_t t = mp_obj_get_int(target_obj);
+    if (t < 0 || t > 255) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ae luma target must be 0..255"));
+    }
+    return mp_obj_new_bool(cam_scanner_set_ae_luma_target((uint8_t)t));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(camera_scanner_set_ae_luma_target_obj, mp_camera_scanner_set_ae_luma_target);
+
+// get_ae_luma_target() -> int. 0 when no auto-exposure loop is running.
+static mp_obj_t mp_camera_scanner_get_ae_luma_target(void) {
+    return MP_OBJ_NEW_SMALL_INT(cam_scanner_get_ae_luma_target());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(camera_scanner_get_ae_luma_target_obj, mp_camera_scanner_get_ae_luma_target);
+
+// set_tone(gamma_x10, black_level) -> bool. ISP tone curve: display gamma x10
+// (22 = 2.2, 0 = leave linear) and the input level mapped to true black (0..64).
+static mp_obj_t mp_camera_scanner_set_tone(mp_obj_t gamma_obj, mp_obj_t black_obj) {
+    mp_int_t g = mp_obj_get_int(gamma_obj);
+    mp_int_t b = mp_obj_get_int(black_obj);
+    if (g < 0 || g > 255 || b < 0 || b > 255) {
+        mp_raise_ValueError(MP_ERROR_TEXT("tone args out of range"));
+    }
+    return mp_obj_new_bool(cam_scanner_set_tone((uint8_t)g, (uint8_t)b));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(camera_scanner_set_tone_obj, mp_camera_scanner_set_tone);
+
+// set_color(saturation, contrast) -> bool. ISP colour trim, 128 = neutral, 0..255.
+static mp_obj_t mp_camera_scanner_set_color(mp_obj_t sat_obj, mp_obj_t con_obj) {
+    mp_int_t sat = mp_obj_get_int(sat_obj);
+    mp_int_t con = mp_obj_get_int(con_obj);
+    if (sat < 0 || sat > 255 || con < 0 || con > 255) {
+        mp_raise_ValueError(MP_ERROR_TEXT("colour args must be 0..255"));
+    }
+    return mp_obj_new_bool(cam_scanner_set_color((uint8_t)sat, (uint8_t)con));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(camera_scanner_set_color_obj, mp_camera_scanner_set_color);
+#endif
+
 static const mp_rom_map_elem_t camera_scanner_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_camera_scanner) },
     { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&camera_scanner_start_obj) },
@@ -190,6 +239,12 @@ static const mp_rom_map_elem_t camera_scanner_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_report_complete), MP_ROM_PTR(&camera_scanner_report_complete_obj) },
     { MP_ROM_QSTR(MP_QSTR_begin_segments), MP_ROM_PTR(&camera_scanner_begin_segments_obj) },
     { MP_ROM_QSTR(MP_QSTR_segment_event), MP_ROM_PTR(&camera_scanner_segment_event_obj) },
+#if CONFIG_CAM_PIPELINE_DEBUG
+    { MP_ROM_QSTR(MP_QSTR_set_ae_luma_target), MP_ROM_PTR(&camera_scanner_set_ae_luma_target_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_ae_luma_target), MP_ROM_PTR(&camera_scanner_get_ae_luma_target_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_tone), MP_ROM_PTR(&camera_scanner_set_tone_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_color), MP_ROM_PTR(&camera_scanner_set_color_obj) },
+#endif
     // Frame-status vocabulary (mirrors scan_coordinator / Python DecodeQRStatus).
     { MP_ROM_QSTR(MP_QSTR_FRAME_NONE), MP_ROM_INT(CAM_SCAN_FRAME_NONE) },
     { MP_ROM_QSTR(MP_QSTR_FRAME_NEW), MP_ROM_INT(CAM_SCAN_FRAME_NEW) },
