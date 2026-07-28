@@ -193,3 +193,27 @@ driver's gain map. The loop never uses `ESP_CAM_SENSOR_GROUP_EXP_GAIN`, so the
 
 `cur_format->isp_info` must be non-NULL or `esp_video_init()` skips the pipeline
 regardless of everything above.
+
+## An enabled IPA algorithm silently overrides the matching V4L2 control
+
+`esp_ipa` re-pushes its own ISP configuration every time it runs, so writing an ISP
+stage over V4L2 on `/dev/video20` **returns 0 and then does nothing** if an enabled
+algorithm owns that stage. See `isp-ipa-overrides-runtime-controls.md` for the general
+form. Ownership on this board:
+
+| ISP stage | owned by | enabled here? | a V4L2 write sticks? |
+|---|---|---|---|
+| GAMMA | `aen` | no | **yes** — this is why the tone curve works |
+| contrast | `aen` | no | yes |
+| saturation | `acc` | **yes** | **no — expect it to be overridden** |
+| CCM | `acc` | yes | no |
+| BF / sharpen / demosaic | `adn` / `aen` | no | yes |
+
+Practical consequence: the tone curve (gamma + black point) is safe because `aen` is
+deliberately absent. The saturation half of the colour trim is **not** — with `acc`
+enabled for its colour matrix, saturation must be changed in the tuning file
+(`acc.saturation`) rather than through `V4L2_CID_SATURATION`. The contrast half is
+unaffected.
+
+This is also the reason the algorithm set is kept minimal rather than enabling the
+vendor's full stack: every algorithm added takes a stage away from direct control.
