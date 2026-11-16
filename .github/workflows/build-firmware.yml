@@ -47,9 +47,10 @@ jobs:
     # and the `build` job's container has no Docker socket. The container job downloads
     # the artifact this uploads and bakes it via `make dist`.
     #
-    # Gated on push: PRs stay compile-only (no dist packaging), so building packs there
-    # would be wasted work. See docs/ci-bake-full-langpacks-todo.md.
-    if: github.event_name == 'push'
+    # Gated on push OR manual run: PRs stay compile-only (no dist packaging), so building
+    # packs there would be wasted work. See docs/ci-bake-full-langpacks-todo.md.
+    # MODIFIED: workflow_dispatch added so manual runs also produce downloadable artifacts.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -80,7 +81,6 @@ jobs:
           echo "built $n locale pack(s)"
           # Guard against a silent English-only build (empty/near-empty collection).
           test "$n" -ge 2
-
       - name: Upload language packs
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -91,8 +91,8 @@ jobs:
 
   build:
     needs: [resolve-image-owner, build-packs]
-    # build-packs runs only on push. GitHub skips a job whose dependency was skipped, so
-    # without this every pull request would skip the firmware build and still pass.
+    # build-packs runs only on push / manual run. GitHub skips a job whose dependency was
+    # skipped, so without this every pull request would skip the firmware build and still pass.
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-24.04
     # Build every supported ESP32-P4 board. All three are esp32p4 (RISC-V), so
@@ -160,18 +160,15 @@ jobs:
           # so re-add it here or git aborts with "dubious ownership".
           git config --global --add safe.directory '*'
           git submodule update --init --recursive ports/esp32/board_common deps/seedsigner-lvgl-screens deps/esp-secp256k1
-
       - name: Prepare sources workspace from prebaked image
         run: |
           mkdir -p deps
           ./scripts/prepare_sources_from_image.sh "$PWD/deps"
-
       - name: Override lvgl-screens ref (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch' && inputs.screens_ref != ''
         run: |
           git -C deps/seedsigner-lvgl-screens fetch origin
           git -C deps/seedsigner-lvgl-screens checkout ${{ inputs.screens_ref }}
-
       - name: Ensure baked ESP-IDF tools environment
         run: |
           test -d /opt/toolchains/esp-idf
@@ -183,13 +180,13 @@ jobs:
           python3 "$IDF_PATH/tools/idf_tools.py" install riscv32-esp-elf-gdb
           source "$IDF_PATH/export.sh"
           idf.py --version
-
-      - name: Stage frozen app (merge to main only)
+      - name: Stage frozen app (merge to main or manual run)
         # PRs stay compile-only (no frozen_app/ -> manifest try/except skips the
-        # freeze). On push to main, stage the app+embit from the pinned deps/
-        # submodules so the build below bakes them in and `make dist` can publish a
+        # freeze). On push to main (or manual run), stage the app+embit from the pinned
+        # deps/ submodules so the build below bakes them in and `make dist` can publish a
         # self-booting image. Version comes from deps/seedsigner git via env.
-        if: github.event_name == 'push'
+        # MODIFIED: workflow_dispatch added.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: ./scripts/ci/ci.sh stage-frozen
 
       - name: Restore ccache
@@ -204,7 +201,6 @@ jobs:
           key: ccache-firmware-${{ env.BUILD_NAME }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             ccache-firmware-${{ env.BUILD_NAME }}-
-
       - name: Configure ccache
         # Fail loudly if the base image ever loses the binary: IDF's CMake launcher
         # only warns and compiles cold when ccache is absent. Zero stats so the
@@ -214,7 +210,6 @@ jobs:
           ccache --version
           ccache --zero-stats
           ccache -p | grep -Ei 'cache_dir|max_size' || true
-
       - name: Build firmware
         run: ./scripts/ci_build.sh "$PWD/deps"
 
@@ -239,24 +234,25 @@ jobs:
             echo "python=$(python3 --version 2>&1)"
             echo "cmake=$(cmake --version | head -n1)"
           } | tee logs/provenance.txt
-
-      - name: Download language packs (merge to main only)
+      - name: Download language packs (merge to main or manual run)
         # The collection built by the build-packs job (plain runner). Lands the locale
         # dirs under lang-packs-staging/ for the dist bake below.
-        if: github.event_name == 'push'
+        # MODIFIED: workflow_dispatch added.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: lang-packs
           path: lang-packs-staging
 
-      - name: Package flashable dist (merge to main only)
+      - name: Package flashable dist (merge to main or manual run)
         # Firmware + baked /main.py launcher image + language packs -> dist/<BOARD>/ with
         # a flash_args that includes the vfs partition, so `esptool write_flash @flash_args`
         # yields a board that boots the FULLY LOCALIZED app on first power-up (no REPL,
         # no microSD). The packs come from the build-packs job's artifact; make dist bakes
         # them into the vfs via SS_PACKS_DIR (resolve_packs()). See
         # docs/ci-bake-full-langpacks-todo.md and BUILDER-13.
-        if: github.event_name == 'push'
+        # MODIFIED: workflow_dispatch added.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           staging="$GITHUB_WORKSPACE/lang-packs-staging"
           # Locate the dir that holds the locale packs (each is <locale>/manifest.json),
@@ -277,9 +273,9 @@ jobs:
           sz=$(stat -c%s "$vfs")
           echo "[dist] $vfs = $sz bytes"
           test "$sz" -gt 1000000
-
-      - name: Upload flashable dist (merge to main only)
-        if: github.event_name == 'push'
+      - name: Upload flashable dist (merge to main or manual run)
+        # MODIFIED: workflow_dispatch added.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ${{ matrix.artifact }}
